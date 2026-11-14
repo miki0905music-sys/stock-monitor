@@ -55,10 +55,18 @@ class NintendoStoreChecker(StockChecker):
             logger.warning("NintendoStore: HTTP取得失敗 url=%s error=%s", url, e)
             return StockResult(status=StockStatus.ERROR, detail=f"HTTP取得失敗: {e}")
 
-        return self.judge(resp.text)
+        return self.judge(resp.text, http_status=resp.status_code)
 
     # ------------------------------------------------------------------
-    def judge(self, html: str) -> StockResult:
+    @staticmethod
+    def _diagnose(soup: BeautifulSoup, html: str, http_status) -> str:
+        """判定できなかったとき、何が返ってきたかを短く記録する（本文は保存しない）。"""
+        title = soup.title.get_text(strip=True)[:60] if soup.title else None
+        has_data = soup.find("script", id="mobify-data") is not None
+        return (f"［診断: HTTP {http_status}, {len(html)}文字, title={title!r}, "
+                f"mobify-data={'あり' if has_data else 'なし'}, button数={len(soup.find_all('button'))}］")
+
+    def judge(self, html: str, http_status=None) -> StockResult:
         """HTML文字列から在庫を判定する（通信を伴わないのでテストしやすい）。"""
         soup = BeautifulSoup(html, "html.parser")
 
@@ -79,7 +87,8 @@ class NintendoStoreChecker(StockChecker):
         if data_status is None and button_status is None:
             return StockResult(
                 status=StockStatus.UNKNOWN, product_name=name, price=price,
-                detail=f"商品データ・ボタンのどちらからも判定できません（構造変更の可能性）{data_note}",
+                detail=(f"商品データ・ボタンのどちらからも判定できません（構造変更の可能性）{data_note}"
+                        f"{self._diagnose(soup, html, http_status)}"),
             )
 
         if data_status is not None and button_status is not None:
